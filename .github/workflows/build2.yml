@@ -1,0 +1,50 @@
+name: build2
+on: workflow_dispatch
+jobs:
+  b:
+    runs-on: macos-26
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: lonzzi/UniXNU-houji, path: device}
+      - uses: actions/checkout@v4
+        with:
+          repository: apple-oss-distributions/cctools
+          path: cctools
+      - uses: actions/checkout@v4
+        with:
+          repository: apple-oss-distributions/xnu
+          path: xnu
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - name: Build CTF tools from cctools
+        run: |
+          cd cctools
+          echo "=== configure/make cctools"
+          (make -j4 2>&1 | tail -40) || echo "::warning::cctools make failed"
+          find . -name "ctfconvert" -o -name "ctfmerge" -o -name "ctfdump" | head
+      - name: Prepare XNU tree
+        run: |
+          set -x
+          git -C xnu checkout 1b191cb58250d0705d8a51287127505aa4bc0789 || git -C xnu log -1 --format=%H
+          python3 device/tools/prepare-sources.py kernel --upstream "$PWD/xnu" --output "$PWD/.deps/kernel" 2>&1 | tail -20
+          ls .deps/kernel/config/MASTER.arm64.sweet || echo "::error::no master config"
+      - name: Build kernel
+        env:
+          HOUJI_XNU: ${{ github.workspace }}/.deps/kernel
+          HOUJI_KDK: /
+          HOUJI_FAKEROOT: ${{ github.workspace }}/fakeroot
+          HOUJI_BUILD_ROOT: ${{ github.workspace }}/out/kernel
+          HOUJI_JOBS: 6
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+        run: |
+          mkdir -p fakeroot/usr/local/bin
+          for t in ctfconvert ctfmerge ctfdump; do
+            p=$(find cctools -name "$t" -type f -perm -u+x | head -1)
+            echo "$t -> $p"
+            [ -n "$p" ] && cp "$p" fakeroot/usr/local/bin/
+          done
+          ls -l fakeroot/usr/local/bin
+          bash device/tools/build-kernel.sh 2>&1 | tail -60
+          find out/kernel -name "*.development*" -o -name "kernel" -o -name "mach.*" | head
