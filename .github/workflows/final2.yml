@@ -134,7 +134,9 @@ jobs:
 
         open(''boot.img'',''wb'').write(bytes(h)+pad(kernel)+pad(payload)+pad(dtb))
 
-        print(''boot.img kernel'', len(kernel), ''payload'', len(payload), ''dtb'', len(dtb))PYEOF
+        print(''boot.img kernel'', len(kernel), ''payload'', len(payload), ''dtb'', len(dtb))
+
+        PYEOF
 
         ls -l boot.img || true'
     - name: Upload boot image
