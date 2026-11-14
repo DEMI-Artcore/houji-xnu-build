@@ -27,45 +27,45 @@ jobs:
         run: |
           mkdir -p uefi/HoujiVendorPkg/EnvDxeEnhanced
           cat > uefi/HoujiVendorPkg/EnvDxeEnhanced/EnvDxeEnhanced.c <<'CEOF'
-#include <Uefi.h>
-#include <Library/UefiBootServicesTableLib.h>
-#include <Library/DebugLib.h>
+          #include <Uefi.h>
+          #include <Library/UefiBootServicesTableLib.h>
+          #include <Library/DebugLib.h>
 
-EFI_STATUS
-EFIAPI
-EnvDxeEnhancedEntry (
-  IN EFI_HANDLE        ImageHandle,
-  IN EFI_SYSTEM_TABLE  *SystemTable
-  )
-{
-  DEBUG ((EFI_D_INFO, "EnvDxeEnhanced: stub (vendor module not available in this build)\n"));
-  return EFI_SUCCESS;
-}
+          EFI_STATUS
+          EFIAPI
+          EnvDxeEnhancedEntry (
+            IN EFI_HANDLE        ImageHandle,
+            IN EFI_SYSTEM_TABLE  *SystemTable
+            )
+          {
+            DEBUG ((EFI_D_INFO, "EnvDxeEnhanced: stub\n"));
+            return EFI_SUCCESS;
+          }
 
-CEOF
+          CEOF
           cat > uefi/HoujiVendorPkg/EnvDxeEnhanced/EnvDxeEnhanced.inf <<'IEOF'
-[Defines]
-  INF_VERSION                    = 0x00010005
-  BASE_NAME                      = EnvDxeEnhanced
-  FILE_GUID                      = 7A1B0F10-1111-4A2B-9C3D-0E1F2A3B4C5D
-  MODULE_TYPE                    = DXE_DRIVER
-  VERSION_STRING                 = 1.0
-  ENTRY_POINT                    = EnvDxeEnhancedEntry
+          [Defines]
+            INF_VERSION                    = 0x00010005
+            BASE_NAME                      = EnvDxeEnhanced
+            FILE_GUID                      = 7A1B0F10-1111-4A2B-9C3D-0E1F2A3B4C5D
+            MODULE_TYPE                    = DXE_DRIVER
+            VERSION_STRING                 = 1.0
+            ENTRY_POINT                    = EnvDxeEnhancedEntry
 
-[Sources]
-  EnvDxeEnhanced.c
+          [Sources]
+            EnvDxeEnhanced.c
 
-[Packages]
-  MdePkg/MdePkg.dec
+          [Packages]
+            MdePkg/MdePkg.dec
 
-[LibraryClasses]
-  UefiBootServicesTableLib
-  DebugLib
+          [LibraryClasses]
+            UefiBootServicesTableLib
+            DebugLib
 
-[Depex]
-  TRUE
+          [Depex]
+            TRUE
 
-IEOF
+          IEOF
           ls -l uefi/HoujiVendorPkg/EnvDxeEnhanced/
 
       - name: Build BaseTools
