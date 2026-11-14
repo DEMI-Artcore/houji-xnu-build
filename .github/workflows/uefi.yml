@@ -1,0 +1,46 @@
+name: uefi
+on: workflow_dispatch
+jobs:
+  u:
+    runs-on: macos-26
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: lonzzi/UniXNU-houji, path: device}
+      - name: Clone Mu-Silicium with submodules
+        run: |
+          git clone --depth 1 https://github.com/Project-Silicium/Mu-Silicium.git uefi
+          cd uefi
+          git submodule update --init --depth 1 -- Binaries Mu_Basecore Common/Mu Common/Mu_OEM_Sample Silicium-ACPI || true
+          du -sh . ; ls
+      - name: Apply houji overlay and patches
+        run: |
+          cp -r device/uefi/overlay/. uefi/
+          ls uefi/Platforms/Xiaomi/houjiPkg/ | head
+          (cd uefi/Mu_Basecore && git apply --check ../patches/Mu_Basecore.patch 2>/dev/null && git apply ../patches/Mu_Basecore.patch) || echo "::warning::Mu_Basecore patch not applied"
+          (cd uefi && git apply device/../device/uefi/patches/local.patch) || echo "::warning::local patch not applied"
+      - name: Build BaseTools and firmware
+        run: |
+          set -x
+          export WORKSPACE="$PWD/uefi"
+          export EDK_TOOLS_PATH="$PWD/uefi/Mu_Basecore/BaseTools"
+          export CONF_PATH="$PWD/edk2-conf"; mkdir -p "$CONF_PATH"
+          for f in target tools_def build_rule; do [ -f "$CONF_PATH/$f.txt" ] || cp "$EDK_TOOLS_PATH/Conf/$f.template" "$CONF_PATH/$f.txt"; done
+          export PACKAGES_PATH="$WORKSPACE:$WORKSPACE/Mu_Basecore:$WORKSPACE/Common/Mu:$WORKSPACE/Common/Mu_OEM_Sample:$WORKSPACE/Silicium-ACPI"
+          export PYTHON_COMMAND=python3
+          export PATH="$EDK_TOOLS_PATH/BinWrappers/PosixLike:$EDK_TOOLS_PATH/Source/C/bin:$PATH"
+          [ -f "$EDK_TOOLS_PATH/Source/C/bin/GenFw" ] || make -C "$EDK_TOOLS_PATH/Source/C" -j4
+          cd "$WORKSPACE"
+          ls Platforms/Xiaomi/houjiPkg/houji.dsc
+          build -p Platforms/Xiaomi/houjiPkg/houji.dsc -a AARCH64 -b DEBUG -t CLANGPDB -n 6             -D FD_BASE=0xA7100000 -D FD_SIZE=0x300000 -D FD_BLOCKS=0x300 -D DEVICE_MODEL=0 -D ENABLE_SECUREBOOT=0 2>&1 | tail -60
+          find Build -name "*.fd" | head
+      - name: Upload FD
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: houji-uefi-fd
+          path: |
+            uefi/Build/**/*.fd
+            uefi/Build/**/*.log
+          if-no-files-found: warn
+          retention-days: 3
