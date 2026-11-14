@@ -1,0 +1,62 @@
+name: kbuild2
+on: workflow_dispatch
+jobs:
+  k:
+    runs-on: macos-26
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: lonzzi/UniXNU-houji, path: device}
+      - uses: actions/checkout@v4
+        with:
+          repository: apple-oss-distributions/xnu
+          path: xnu
+          ref: 1b191cb58250d0705d8a51287127505aa4bc0789
+      - uses: actions/checkout@v4
+        with: {repository: apple-oss-distributions/AvailabilityVersions, path: avail}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - name: Install tools
+        run: |
+          brew install llvm lld
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+      - name: Prepare XNU tree
+        run: |
+          python3 device/tools/prepare-sources.py kernel --upstream "$PWD/xnu" --output "$PWD/.deps/kernel" 2>&1 | tail -10
+          ls -l .deps/kernel/config/MASTER.arm64.sweet
+      - name: Fake CTF tools
+        run: |
+          mkdir -p fakeroot/usr/local/bin
+          for t in ctfconvert ctfmerge ctfdump; do
+            printf '#!/bin/sh\nexit 0\n' > fakeroot/usr/local/bin/$t
+            chmod +x fakeroot/usr/local/bin/$t
+          done
+          mkdir -p fakeroot/usr/local/libexec
+          cp -v avail/availability.pl fakeroot/usr/local/libexec/ || true
+          chmod +x fakeroot/usr/local/libexec/availability.pl || true
+          sed -i '' 's|^#!/usr/bin/perl|#!/usr/bin/env perl|' fakeroot/usr/local/libexec/availability.pl 2>/dev/null || true
+          ls -l fakeroot/usr/local/bin fakeroot/usr/local/libexec
+          ls /System/Library/KernelSupport | head
+      - name: Build kernel
+        env:
+          HOUJI_XNU: ${{ github.workspace }}/.deps/kernel
+          HOUJI_KDK: /
+          HOUJI_FAKEROOT: ${{ github.workspace }}/fakeroot
+          HOUJI_BUILD_ROOT: ${{ github.workspace }}/out/kernel
+          HOUJI_JOBS: 6
+          DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+        run: |
+          bash device/tools/build-kernel.sh 2>&1 | tail -120
+          find out/kernel -type f -name '*.development.*' -o -type f -name 'kernel' | head
+      - name: Upload kernel
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: houji-full-kernel
+          path: |
+            out/kernel/**/*.bcm2837*
+            out/kernel/**/kernel*
+            out/kernel/**/*.macho
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 3
