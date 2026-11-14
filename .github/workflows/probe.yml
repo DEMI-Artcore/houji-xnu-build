@@ -1,0 +1,27 @@
+name: probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: lonzzi/UniXNU-houji
+          path: device
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: probe
+        run: |
+          set -x
+          ls device
+          echo "=== sources.lock.json (head)"; head -c 3000 device/sources.lock.json || true
+          echo "=== check-source-tree"; python3 device/tools/check-source-tree.py || true
+          echo "=== xcode"; xcodebuild -version; xcrun --sdk macosx --show-sdk-path
+          echo "=== KDK?"; ls /Library/Developer/KDKs 2>/dev/null || echo "no KDK dir"
+          ls -d /Library/Developer/CoreSimulator/* 2>/dev/null | head
+          find / -maxdepth 4 -name "KernelSupport" -type d 2>/dev/null | head
+          echo "=== ctf tools"; which ctfconvert ctfmerge ctfdump || true
+          echo "=== prepare-sources help"; python3 device/tools/prepare-sources.py --help || true
+          echo "=== build-kernel head"; head -40 device/tools/build-kernel.sh
