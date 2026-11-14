@@ -1,0 +1,104 @@
+name: uefi9
+on: workflow_dispatch
+jobs:
+  u:
+    runs-on: macos-26
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with: {repository: lonzzi/UniXNU-houji, path: device}
+      - uses: actions/checkout@v4
+        with: {repository: UniXNU/UniXNU, path: unixnu}
+      - name: Clone Mu-Silicium
+        run: |
+          git clone --depth 1 https://github.com/Project-Silicium/Mu-Silicium.git uefi
+          cd uefi
+          git submodule update --init --depth 1 -- Binaries Mu_Basecore Common/Mu Common/Mu_OEM_Sample Silicium-ACPI || true
+          (cd Mu_Basecore && git submodule update --init --recursive --depth 1 || true)
+          ls Silicon/Qualcomm/LanaiPkg/LanaiPkg.dsc.inc
+      - name: Overlay and patches
+        run: |
+          cp -r device/uefi/overlay/. uefi/
+          cp -r device/uefi/patches uefi/patches || true
+          ls uefi/Platforms/Xiaomi/houjiPkg/houji.dsc
+          (cd uefi/Mu_Basecore && git apply --check ../patches/Mu_Basecore.patch && git apply ../patches/Mu_Basecore.patch) || echo "::warning::basecore patch"
+          (cd uefi && git apply ../device/uefi/patches/local.patch) || echo "::warning::local patch"
+      - name: Create HoujiVendorPkg stub
+        run: |
+          mkdir -p uefi/HoujiVendorPkg/EnvDxeEnhanced
+          cat > uefi/HoujiVendorPkg/EnvDxeEnhanced/EnvDxeEnhanced.c <<'CEOF'
+          #include <Uefi.h>
+          #include <Library/UefiBootServicesTableLib.h>
+          #include <Library/DebugLib.h>
+
+          EFI_STATUS
+          EFIAPI
+          EnvDxeEnhancedEntry (
+            IN EFI_HANDLE        ImageHandle,
+            IN EFI_SYSTEM_TABLE  *SystemTable
+            )
+          {
+            DEBUG ((EFI_D_INFO, "EnvDxeEnhanced: stub\n"));
+            return EFI_SUCCESS;
+          }
+
+          CEOF
+          cat > uefi/HoujiVendorPkg/EnvDxeEnhanced/EnvDxeEnhanced.inf <<'IEOF'
+          [Defines]
+            INF_VERSION                    = 0x00010005
+            BASE_NAME                      = EnvDxeEnhanced
+            FILE_GUID                      = 7A1B0F10-1111-4A2B-9C3D-0E1F2A3B4C5D
+            MODULE_TYPE                    = DXE_DRIVER
+            VERSION_STRING                 = 1.0
+            ENTRY_POINT                    = EnvDxeEnhancedEntry
+
+          [Sources]
+            EnvDxeEnhanced.c
+
+          [Packages]
+            MdePkg/MdePkg.dec
+
+          [LibraryClasses]
+            UefiBootServicesTableLib
+            DebugLib
+
+          [Depex]
+            TRUE
+
+          IEOF
+          ls -l uefi/HoujiVendorPkg/EnvDxeEnhanced/
+
+      - name: Install host tools
+        run: |
+          brew install llvm lld mtools dtc
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix llvm)/bin/llvm-lib" --version || true
+
+      - name: Build BaseTools
+        run: |
+          export EDK_TOOLS_PATH="$PWD/uefi/Mu_Basecore/BaseTools"
+          make -C "$EDK_TOOLS_PATH/Source/C" -j4 || make -C "$EDK_TOOLS_PATH/Source/C" -j1 || true
+          ls -l "$EDK_TOOLS_PATH/Source/C/bin/GenFw" && echo BASETOOLS_OK
+      - name: Build firmware
+        run: |
+          set -o pipefail
+          set -x
+          export WORKSPACE="$PWD/uefi"
+          export EDK_TOOLS_PATH="$PWD/uefi/Mu_Basecore/BaseTools"
+          export CONF_PATH="$PWD/edk2-conf"; mkdir -p "$CONF_PATH"
+          for f in target tools_def build_rule; do [ -f "$CONF_PATH/$f.txt" ] || cp "$EDK_TOOLS_PATH/Conf/$f.template" "$CONF_PATH/$f.txt"; done
+          export PACKAGES_PATH="$WORKSPACE:$WORKSPACE/Mu_Basecore:$WORKSPACE/Common/Mu:$WORKSPACE/Common/Mu_OEM_Sample:$WORKSPACE/Silicium-ACPI:$WORKSPACE/Silicon/Qualcomm:$WORKSPACE/Silicon/Silicium:$WORKSPACE/Silicon:$WORKSPACE/Platforms/Xiaomi:$GITHUB_WORKSPACE/unixnu/package:$GITHUB_WORKSPACE/unixnu/kits"
+          export PYTHON_COMMAND=python3
+          export PATH="$EDK_TOOLS_PATH/BinWrappers/PosixLike:$EDK_TOOLS_PATH/Source/C/bin:$PATH"
+          cd "$WORKSPACE"
+          build -p Platforms/Xiaomi/houjiPkg/houji.dsc -a AARCH64 -b DEBUG -t CLANGPDB -n 6             -D FD_BASE=0xA7100000 -D FD_SIZE=0x300000 -D FD_BLOCKS=0x300 -D DEVICE_MODEL=0 -D ENABLE_SECUREBOOT=0 2>&1 | tail -80
+          echo "--- outputs:"; find Build -name "*.fd" | head -20
+      - name: Upload FD
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: houji-uefi-fd
+          path: |
+            uefi/Build/**/*.fd
+          if-no-files-found: warn
+          retention-days: 3
